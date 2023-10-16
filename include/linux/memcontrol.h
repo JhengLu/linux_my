@@ -133,6 +133,8 @@ struct mem_cgroup_per_node {
 
 	struct shrinker_info __rcu	*shrinker_info;
 
+	unsigned long       memory_high;
+
 	struct rb_node		tree_node;	/* RB tree node */
 	unsigned long		usage_in_excess;/* Set to the value by which */
 						/* the soft limit is exceeded*/

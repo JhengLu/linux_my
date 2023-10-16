@@ -5352,6 +5352,7 @@ mem_cgroup_css_alloc(struct cgroup_subsys_state *parent_css)
 {
 	struct mem_cgroup *parent = mem_cgroup_from_css(parent_css);
 	struct mem_cgroup *memcg, *old_memcg;
+	int nid;
 
 	old_memcg = set_active_memcg(parent);
 	memcg = mem_cgroup_alloc();
@@ -5365,6 +5366,9 @@ mem_cgroup_css_alloc(struct cgroup_subsys_state *parent_css)
 	memcg->zswap_max = PAGE_COUNTER_MAX;
 #endif
 	page_counter_set_high(&memcg->swap, PAGE_COUNTER_MAX);
+	for_each_node(nid) {
+		WRITE_ONCE(memcg->nodeinfo[nid]->memory_high, PAGE_COUNTER_MAX);
+	}
 	if (parent) {
 		WRITE_ONCE(memcg->swappiness, mem_cgroup_swappiness(parent));
 		WRITE_ONCE(memcg->oom_kill_disable, READ_ONCE(parent->oom_kill_disable));
@@ -6522,6 +6526,22 @@ static ssize_t memory_high_write(struct kernfs_open_file *of,
 	return nbytes;
 }
 
+static int memory_per_numa_high_show(struct seq_file *m, void *v)
+{
+	int nid;
+	for_each_node(nid) {
+		seq_puts_memcg_tunable(m,
+			READ_ONCE(mem_cgroup_from_seq(m)->nodeinfo[nid]->memory_high));
+	}
+	return 0;
+}
+
+static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
+				 char *buf, size_t nbytes, loff_t off)
+{
+	return 0;
+}
+
 static int memory_max_show(struct seq_file *m, void *v)
 {
 	return seq_puts_memcg_tunable(m,
@@ -6756,6 +6776,12 @@ static struct cftype memory_files[] = {
 		.flags = CFTYPE_NOT_ON_ROOT,
 		.seq_show = memory_high_show,
 		.write = memory_high_write,
+	},
+	{
+		.name = "per-numa-high",
+		.flags = CFTYPE_NOT_ON_ROOT,
+		.seq_show = memory_per_numa_high_show,
+		.write = memory_per_numa_high_write,
 	},
 	{
 		.name = "max",
