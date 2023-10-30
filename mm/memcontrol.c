@@ -6526,14 +6526,23 @@ static ssize_t memory_high_write(struct kernfs_open_file *of,
 	return nbytes;
 }
 
+// TODO: add NUMA ifdef check
+
 static int memory_per_numa_high_show(struct seq_file *m, void *v)
 {
 	int nid;
 	for_each_node(nid) {
+		struct mem_cgroup *memcg = mem_cgroup_from_seq(m);
 		seq_puts_memcg_tunable(m,
-			READ_ONCE(mem_cgroup_from_seq(m)->nodeinfo[nid]->memory_high));
+			READ_ONCE(memcg->nodeinfo[nid]->memory_high));
 	}
 	return 0;
+}
+
+static inline unsigned long lruvec_anon_pages(struct lruvec *lruvec)
+{
+	int item = NR_ANON_MAPPED;
+	return lruvec_page_state(lruvec, item) * memcg_page_state_unit(item);
 }
 
 static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
@@ -6543,24 +6552,11 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 	unsigned int nr_retries = MAX_RECLAIM_RETRIES;
 	bool drained = false;
 	unsigned long high;
-	int err;
 	int nid;
-	char *high_limit;
 
-	//printk(KERN_INFO "PUPU cgroup per numa high write buf: %s\n", buf);
-	//return nbytes;
-
-	// while (high_limit=strsep(&buf, "\n")) {
-	// 	high_limit = strstrip(high_limit);
-	// }
-		
-	// buf = strstrip(buf);
-	// err = page_counter_memparse(buf, "max", &high);		//TODO: should parse multiple lines
-	// if (err)
-	// 	return err;
 	for_each_node(nid) {
-		//READ_ONCE(memcg->nodeinfo[nid]->memory_high);
-		high_limit = strsep(&buf, "\n");
+		int err;
+		char *high_limit = strsep(&buf, "\n");
 		high_limit = strstrip(high_limit);
 
 		err = page_counter_memparse(high_limit, "max", &high);
@@ -6569,33 +6565,39 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 
 		WRITE_ONCE(memcg->nodeinfo[nid]->memory_high, high);
 
-		printk(KERN_INFO "PUPU numa[%d] high limit: %lu; buf: %s\n", nid, high, high_limit);
+		//printk(KERN_INFO "PUPU numa[%d] high limit: %lu; buf: %s\n", nid, high, high_limit);
 	}
-	return nbytes;
 
-	//page_counter_set_high(&memcg->memory, high);	// TODO: write to per_node high limit instead
+	// read memory usage for each numa node
+	for_each_node_state(nid, N_MEMORY) {
+		for (;;) {
+			struct lruvec *lruvec;
+			unsigned long nr_pages;
 
-	for (;;) {
-		unsigned long nr_pages = page_counter_read(&memcg->memory);
-		unsigned long reclaimed;
+			lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
+			nr_pages = lruvec_anon_pages(lruvec);
+			
+			unsigned long reclaimed;
 
-		if (nr_pages <= high)
-			break;
+			if (nr_pages <= high)
+				break;
 
-		if (signal_pending(current))
-			break;
+			if (signal_pending(current))
+				break;
 
-		if (!drained) {
-			drain_all_stock(memcg);
-			drained = true;
-			continue;
+			if (!drained) {
+				drain_all_stock(memcg);
+				drained = true;
+				continue;
+			}
+
+			reclaimed = try_to_free_mem_cgroup_pages(memcg,
+						nr_pages - high, GFP_KERNEL,
+						MEMCG_RECLAIM_MAY_SWAP);
+
+			if (!reclaimed && !nr_retries--)
+				break;
 		}
-
-		reclaimed = try_to_free_mem_cgroup_pages(memcg, nr_pages - high,
-					GFP_KERNEL, MEMCG_RECLAIM_MAY_SWAP);
-
-		if (!reclaimed && !nr_retries--)
-			break;
 	}
 
 	memcg_wb_domain_size_changed(memcg);
