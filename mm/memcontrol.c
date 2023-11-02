@@ -6582,6 +6582,7 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 			nr_pages = lruvec_anon_pages(lruvec);
 			
 			unsigned long reclaimed;
+			high = READ_ONCE(memcg->nodeinfo[nid]->memory_high);
 
 			if (nr_pages <= high)
 				break;
@@ -6596,7 +6597,8 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 			}
 
 			reclaimed = try_to_free_mem_cgroup_pages(memcg,
-						nr_pages - high, GFP_KERNEL,
+						nr_pages - high,
+						GFP_KERNEL | __GFP_THISNODE,
 						MEMCG_RECLAIM_MAY_SWAP);
 
 			if (!reclaimed && !nr_retries--)
