@@ -2406,12 +2406,57 @@ static unsigned long reclaim_high(struct mem_cgroup *memcg,
 	return nr_reclaimed;
 }
 
+static unsigned long anon_pages_per_node(struct mem_cgroup *memcg, int nid) {
+	struct lruvec *lruvec;
+	int item = NR_ANON_MAPPED;
+
+	lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
+	return lruvec_page_state(lruvec, item) * memcg_page_state_unit(item);
+}
+
+static unsigned long reclaim_high_on_node(struct mem_cgroup *memcg,
+				  int nid, unsigned int nr_pages,
+				  gfp_t gfp_mask)
+{
+	unsigned long nr_reclaimed = 0;
+
+	do {
+		unsigned long pflags, high;
+
+		high = READ_ONCE(memcg->nodeinfo[nid]->memory_high);
+		if (anon_pages_per_node(memcg, nid) <= high)
+			continue;
+
+		memcg_memory_event(memcg, MEMCG_HIGH);
+
+		psi_memstall_enter(&pflags);
+		nr_reclaimed += try_to_free_mem_cgroup_pages_on_node(memcg,
+							nid,
+							nr_pages,
+							gfp_mask,
+							MEMCG_RECLAIM_MAY_SWAP);
+		psi_memstall_leave(&pflags);
+	} while ((memcg = parent_mem_cgroup(memcg)) &&
+		 !mem_cgroup_is_root(memcg));
+
+	return nr_reclaimed;
+}
+
 static void high_work_func(struct work_struct *work)
 {
 	struct mem_cgroup *memcg;
 
 	memcg = container_of(work, struct mem_cgroup, high_work);
 	reclaim_high(memcg, MEMCG_CHARGE_BATCH, GFP_KERNEL);
+}
+
+static void high_work_func_per_node(struct work_struct *work)
+{
+	struct mem_cgroup_per_node *nodeinfo;
+
+	nodeinfo = container_of(work, struct mem_cgroup_per_node, high_work);
+	reclaim_high_on_node(nodeinfo->memcg, nodeinfo->node_id,
+			     MEMCG_CHARGE_BATCH, GFP_KERNEL);
 }
 
 /*
@@ -2634,6 +2679,85 @@ out:
 	css_put(&memcg->css);
 }
 
+void mem_cgroup_handle_over_high_on_node(int nid, gfp_t gfp_mask)
+{
+	unsigned long penalty_jiffies;
+	unsigned long pflags;
+	unsigned long nr_reclaimed;
+	unsigned int nr_pages = current->memcg_nr_pages_over_high;
+	int nr_retries = MAX_RECLAIM_RETRIES;
+	struct mem_cgroup *memcg;
+	bool in_retry = false;
+
+	if (likely(!nr_pages))
+		return;
+
+	memcg = get_mem_cgroup_from_mm(current->mm);
+	current->memcg_nr_pages_over_high = 0;
+
+retry_reclaim:
+	/*
+	 * The allocating task should reclaim at least the batch size, but for
+	 * subsequent retries we only want to do what's necessary to prevent oom
+	 * or breaching resource isolation.
+	 *
+	 * This is distinct from memory.max or page allocator behaviour because
+	 * memory.high is currently batched, whereas memory.max and the page
+	 * allocator run every time an allocation is made.
+	 */
+	nr_reclaimed = reclaim_high_on_node(memcg, nid,
+				    in_retry ? SWAP_CLUSTER_MAX : nr_pages,
+				    gfp_mask);
+
+	/*
+	 * memory.high is breached and reclaim is unable to keep up. Throttle
+	 * allocators proactively to slow down excessive growth.
+	 */
+	penalty_jiffies = calculate_high_delay(memcg, nr_pages,
+					       mem_find_max_overage(memcg));
+
+	penalty_jiffies += calculate_high_delay(memcg, nr_pages,
+						swap_find_max_overage(memcg));
+
+	/*
+	 * Clamp the max delay per usermode return so as to still keep the
+	 * application moving forwards and also permit diagnostics, albeit
+	 * extremely slowly.
+	 */
+	penalty_jiffies = min(penalty_jiffies, MEMCG_MAX_HIGH_DELAY_JIFFIES);
+
+	/*
+	 * Don't sleep if the amount of jiffies this memcg owes us is so low
+	 * that it's not even worth doing, in an attempt to be nice to those who
+	 * go only a small amount over their memory.high value and maybe haven't
+	 * been aggressively reclaimed enough yet.
+	 */
+	if (penalty_jiffies <= HZ / 100)
+		goto out;
+
+	/*
+	 * If reclaim is making forward progress but we're still over
+	 * memory.high, we want to encourage that rather than doing allocator
+	 * throttling.
+	 */
+	if (nr_reclaimed || nr_retries--) {
+		in_retry = true;
+		goto retry_reclaim;
+	}
+
+	/*
+	 * If we exit early, we're guaranteed to die (since
+	 * schedule_timeout_killable sets TASK_KILLABLE). This means we don't
+	 * need to account for any ill-begotten jiffies to pay them off later.
+	 */
+	psi_memstall_enter(&pflags);
+	schedule_timeout_killable(penalty_jiffies);
+	psi_memstall_leave(&pflags);
+
+out:
+	css_put(&memcg->css);
+}
+
 static int try_charge_memcg(struct mem_cgroup *memcg, gfp_t gfp_mask,
 			unsigned int nr_pages)
 {
@@ -2647,6 +2771,7 @@ static int try_charge_memcg(struct mem_cgroup *memcg, gfp_t gfp_mask,
 	bool drained = false;
 	bool raised_max_event = false;
 	unsigned long pflags;
+	int nid;
 
 retry:
 	if (consume_stock(memcg, nr_pages))
@@ -2783,44 +2908,82 @@ done_restock:
 	 * change in the meantime.  As high limit is checked again before
 	 * reclaim, the cost of mismatch is negligible.
 	 */
-	do {
-		bool mem_high, swap_high;
+	//do {
+	//	bool mem_high, swap_high;
 
-		mem_high = page_counter_read(&memcg->memory) >
-			READ_ONCE(memcg->memory.high);
-		swap_high = page_counter_read(&memcg->swap) >
-			READ_ONCE(memcg->swap.high);
+	//	mem_high = page_counter_read(&memcg->memory) >
+	//		READ_ONCE(memcg->memory.high);
+	//	swap_high = page_counter_read(&memcg->swap) >
+	//		READ_ONCE(memcg->swap.high);
 
-		/* Don't bother a random interrupted task */
-		if (!in_task()) {
+	//	/* Don't bother a random interrupted task */
+	//	if (!in_task()) {
+	//		if (mem_high) {
+	//			schedule_work(&memcg->high_work);
+	//			break;
+	//		}
+	//		continue;
+	//	}
+
+	//	if (mem_high || swap_high) {
+	//		/*
+	//		 * The allocating tasks in this cgroup will need to do
+	//		 * reclaim or be throttled to prevent further growth
+	//		 * of the memory or swap footprints.
+	//		 *
+	//		 * Target some best-effort fairness between the tasks,
+	//		 * and distribute reclaim work and delay penalties
+	//		 * based on how much each task is actually allocating.
+	//		 */
+	//		current->memcg_nr_pages_over_high += batch;
+	//		set_notify_resume(current);
+	//		break;
+	//	}
+	//} while ((memcg = parent_mem_cgroup(memcg)));
+	//if (current->memcg_nr_pages_over_high > MEMCG_CHARGE_BATCH &&
+	//    !(current->flags & PF_MEMALLOC) &&
+	//    gfpflags_allow_blocking(gfp_mask)) {
+	//	mem_cgroup_handle_over_high(gfp_mask);
+	//}
+
+	// TODO: use a #ifdef to keep the orig code
+
+	// Note: we'll ignore handling swap_high for now; (TODO: Hasan on this)
+
+	for_each_node_state(nid, N_MEMORY) {
+		do {
+			unsigned long high, nr_pages_per_node;
+			bool mem_high;
+			struct mem_cgroup_per_node *nodeinfo =
+				memcg->nodeinfo[nid];
+
+			nr_pages_per_node = anon_pages_per_node(memcg, nid);
+			high = READ_ONCE(nodeinfo->memory_high);
+			mem_high = nr_pages_per_node - high;
+
+			/* Don't bother a random interrupted task */
+			if (!in_task()) {
+				if (mem_high) {
+					schedule_work(&nodeinfo->high_work);
+					break;
+				}
+				continue;
+			}
+
 			if (mem_high) {
-				schedule_work(&memcg->high_work);
+				current->memcg_nr_pages_over_high += batch;
+				set_notify_resume(current);
 				break;
 			}
-			continue;
-		}
+		} while ((memcg = parent_mem_cgroup(memcg)));
 
-		if (mem_high || swap_high) {
-			/*
-			 * The allocating tasks in this cgroup will need to do
-			 * reclaim or be throttled to prevent further growth
-			 * of the memory or swap footprints.
-			 *
-			 * Target some best-effort fairness between the tasks,
-			 * and distribute reclaim work and delay penalties
-			 * based on how much each task is actually allocating.
-			 */
-			current->memcg_nr_pages_over_high += batch;
-			set_notify_resume(current);
-			break;
+		if (current->memcg_nr_pages_over_high > MEMCG_CHARGE_BATCH &&
+		    !(current->flags & PF_MEMALLOC) &&
+		    gfpflags_allow_blocking(gfp_mask)) {
+			mem_cgroup_handle_over_high_on_node(nid, gfp_mask);
 		}
-	} while ((memcg = parent_mem_cgroup(memcg)));
-
-	if (current->memcg_nr_pages_over_high > MEMCG_CHARGE_BATCH &&
-	    !(current->flags & PF_MEMALLOC) &&
-	    gfpflags_allow_blocking(gfp_mask)) {
-		mem_cgroup_handle_over_high(gfp_mask);
 	}
+
 	return 0;
 }
 
@@ -5248,6 +5411,7 @@ static int alloc_mem_cgroup_per_node_info(struct mem_cgroup *memcg, int node)
 
 	lruvec_init(&pn->lruvec);
 	pn->memcg = memcg;
+	pn->node_id = node;
 
 	memcg->nodeinfo[node] = pn;
 	return 0;
@@ -5317,6 +5481,9 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 		goto fail;
 
 	INIT_WORK(&memcg->high_work, high_work_func);
+	for_each_node(node)
+		INIT_WORK(&memcg->nodeinfo[node]->high_work,
+			  high_work_func_per_node);
 	INIT_LIST_HEAD(&memcg->oom_notify);
 	mutex_init(&memcg->thresholds_lock);
 	spin_lock_init(&memcg->move_lock);
@@ -6543,12 +6710,6 @@ static int memory_per_numa_high_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static inline unsigned long lruvec_anon_pages(struct lruvec *lruvec)
-{
-	int item = NR_ANON_MAPPED;
-	return lruvec_page_state(lruvec, item) * memcg_page_state_unit(item);
-}
-
 static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 				 char *buf, size_t nbytes, loff_t off)
 {
@@ -6575,13 +6736,9 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 	// read memory usage for each numa node
 	for_each_node_state(nid, N_MEMORY) {
 		for (;;) {
-			struct lruvec *lruvec;
-			unsigned long nr_pages;
+			unsigned long nr_pages, reclaimed;
 
-			lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
-			nr_pages = lruvec_anon_pages(lruvec);
-			
-			unsigned long reclaimed;
+			nr_pages = anon_pages_per_node(memcg, nid);
 			high = READ_ONCE(memcg->nodeinfo[nid]->memory_high);
 
 			if (nr_pages <= high)
@@ -6596,9 +6753,9 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 				continue;
 			}
 
-			reclaimed = try_to_free_mem_cgroup_pages(memcg,
-						nr_pages - high,
-						GFP_KERNEL | __GFP_THISNODE,
+			reclaimed = try_to_free_mem_cgroup_pages_on_node(memcg,
+						nid, nr_pages - high,
+						GFP_KERNEL,
 						MEMCG_RECLAIM_MAY_SWAP);
 
 			if (!reclaimed && !nr_retries--)

@@ -133,7 +133,9 @@ struct mem_cgroup_per_node {
 
 	struct shrinker_info __rcu	*shrinker_info;
 
-	unsigned long       memory_high;
+	unsigned long		memory_high;
+	int			node_id;
+	struct work_struct 	high_work;
 
 	struct rb_node		tree_node;	/* RB tree node */
 	unsigned long		usage_in_excess;/* Set to the value by which */

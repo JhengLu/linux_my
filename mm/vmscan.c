@@ -7161,6 +7161,47 @@ unsigned long try_to_free_mem_cgroup_pages(struct mem_cgroup *memcg,
 
 	return nr_reclaimed;
 }
+
+unsigned long try_to_free_mem_cgroup_pages_on_node(struct mem_cgroup *memcg,
+						   int nid,
+					   	   unsigned long nr_pages,
+					   	   gfp_t gfp_mask,
+					   	   unsigned int reclaim_options)
+{
+	unsigned long nr_reclaimed;
+	unsigned int noreclaim_flag;
+	struct scan_control sc = {
+		.nr_to_reclaim = max(nr_pages, SWAP_CLUSTER_MAX),
+		.gfp_mask = (current_gfp_context(gfp_mask) & GFP_RECLAIM_MASK) |
+				(GFP_HIGHUSER_MOVABLE & ~GFP_RECLAIM_MASK),
+		.reclaim_idx = MAX_NR_ZONES - 1,
+		.target_mem_cgroup = memcg,
+		.priority = DEF_PRIORITY,
+		.may_writepage = !laptop_mode,
+		.may_unmap = 1,
+		.may_swap = !!(reclaim_options & MEMCG_RECLAIM_MAY_SWAP),
+		.proactive = !!(reclaim_options & MEMCG_RECLAIM_PROACTIVE),
+	};
+	/*
+	 * Only select the zonelist corresponding to the given node.
+	 * We add __GFP_THISNODE in the gfp flag passing to node_zonelist()
+	 * to achieve this so that we don't pollute the gfp in the sc.
+	 */
+	struct zonelist *zonelist = node_zonelist(nid,
+						  sc.gfp_mask | __GFP_THISNODE);
+
+	set_task_reclaim_state(current, &sc.reclaim_state);
+	trace_mm_vmscan_memcg_reclaim_begin(0, sc.gfp_mask);
+	noreclaim_flag = memalloc_noreclaim_save();
+
+	nr_reclaimed = do_try_to_free_pages(zonelist, &sc);
+
+	memalloc_noreclaim_restore(noreclaim_flag);
+	trace_mm_vmscan_memcg_reclaim_end(nr_reclaimed);
+	set_task_reclaim_state(current, NULL);
+
+	return nr_reclaimed;
+}
 #endif
 
 static void kswapd_age_node(struct pglist_data *pgdat, struct scan_control *sc)
