@@ -2411,7 +2411,7 @@ static unsigned long anon_pages_per_node(struct mem_cgroup *memcg, int nid) {
 	int item = NR_ANON_MAPPED;
 
 	lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
-	return lruvec_page_state(lruvec, item) * memcg_page_state_unit(item);
+	return lruvec_page_state(lruvec, item);
 }
 
 static unsigned long reclaim_high_on_node(struct mem_cgroup *memcg,
