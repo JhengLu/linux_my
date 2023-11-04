@@ -2689,6 +2689,8 @@ void mem_cgroup_handle_over_high_on_node(int nid, gfp_t gfp_mask)
 	struct mem_cgroup *memcg;
 	bool in_retry = false;
 
+	printk(KERN_INFO "PUPU handle over high on node %d: nr_pages = %u\n", nid, nr_pages);
+
 	if (likely(!nr_pages))
 		return;
 
@@ -2708,6 +2710,7 @@ retry_reclaim:
 	nr_reclaimed = reclaim_high_on_node(memcg, nid,
 				    in_retry ? SWAP_CLUSTER_MAX : nr_pages,
 				    gfp_mask);
+	printk(KERN_INFO "PUPU handle over high on node %d: nr_reclaimed = %lu\n", nid, nr_reclaimed);
 
 	/*
 	 * memory.high is breached and reclaim is unable to keep up. Throttle
@@ -2951,15 +2954,19 @@ done_restock:
 	// Note: we'll ignore handling swap_high for now; (TODO: Hasan on this)
 
 	for_each_node_state(nid, N_MEMORY) {
+		struct mem_cgroup *mc = memcg;
 		do {
 			unsigned long high, nr_pages_per_node;
 			bool mem_high;
 			struct mem_cgroup_per_node *nodeinfo =
-				memcg->nodeinfo[nid];
+				mc->nodeinfo[nid];
 
-			nr_pages_per_node = anon_pages_per_node(memcg, nid);
+			nr_pages_per_node = anon_pages_per_node(mc, nid);
 			high = READ_ONCE(nodeinfo->memory_high);
-			mem_high = nr_pages_per_node - high;
+			printk(KERN_INFO "PUPU on node[%d], nr_anon_pages: %lu, "
+			     "high_limit = %lu\n", nid, nr_pages_per_node, high);
+			mem_high = nr_pages_per_node > high;
+			//mem_high = nr_pages_per_node - high;
 
 			/* Don't bother a random interrupted task */
 			if (!in_task()) {
@@ -2975,7 +2982,9 @@ done_restock:
 				set_notify_resume(current);
 				break;
 			}
-		} while ((memcg = parent_mem_cgroup(memcg)));
+		} while ((mc = parent_mem_cgroup(mc)));
+		printk(KERN_INFO "current->memcg_nr_pages_over_high: %u\n",
+		       current->memcg_nr_pages_over_high);
 
 		if (current->memcg_nr_pages_over_high > MEMCG_CHARGE_BATCH &&
 		    !(current->flags & PF_MEMALLOC) &&
