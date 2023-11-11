@@ -134,6 +134,7 @@ struct mem_cgroup_per_node {
 	struct shrinker_info __rcu	*shrinker_info;
 
 	unsigned long		memory_high;
+	unsigned int 		nr_pages_over_high;
 	int			node_id;
 	struct work_struct 	high_work;
 

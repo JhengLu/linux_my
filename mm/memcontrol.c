@@ -2684,9 +2684,10 @@ void mem_cgroup_handle_over_high_on_node(int nid, gfp_t gfp_mask)
 	unsigned long penalty_jiffies;
 	unsigned long pflags;
 	unsigned long nr_reclaimed;
-	unsigned int nr_pages = current->memcg_nr_pages_over_high;
+	//unsigned int nr_pages = current->memcg_nr_pages_over_high;
 	int nr_retries = MAX_RECLAIM_RETRIES;
-	struct mem_cgroup *memcg;
+	struct mem_cgroup *memcg = get_mem_cgroup_from_mm(current->mm);
+	unsigned int nr_pages = memcg->nodeinfo[nid]->nr_pages_over_high;
 	bool in_retry = false;
 
 	printk(KERN_INFO "PUPU handle over high on node %d: nr_pages = %u\n", nid, nr_pages);
@@ -2694,8 +2695,9 @@ void mem_cgroup_handle_over_high_on_node(int nid, gfp_t gfp_mask)
 	if (likely(!nr_pages))
 		return;
 
-	memcg = get_mem_cgroup_from_mm(current->mm);
-	current->memcg_nr_pages_over_high = 0;
+	//memcg = get_mem_cgroup_from_mm(current->mm);
+	//current->memcg_nr_pages_over_high = 0;
+	memcg->nodeinfo[nid]->nr_pages_over_high = 0;
 
 retry_reclaim:
 	/*
@@ -2953,8 +2955,12 @@ done_restock:
 
 	// Note: we'll ignore handling swap_high for now; (TODO: Hasan on this)
 
-	for_each_node_state(nid, N_MEMORY) {
+	// TODO: fix this bug: when break happens in line #2977, current->nr_pages_over_high is carried over to nid=1,
+	// causing reclamation always happen on node 1 (why it checks > 64 instead of >= 64 at line #2993?)
+	//for_each_node_state(nid, N_MEMORY) {
+	for_each_node(nid) {
 		struct mem_cgroup *mc = memcg;
+		unsigned int nr_pages_over_high;
 		do {
 			unsigned long high, nr_pages_per_node;
 			bool mem_high;
@@ -2963,10 +2969,9 @@ done_restock:
 
 			nr_pages_per_node = anon_pages_per_node(mc, nid);
 			high = READ_ONCE(nodeinfo->memory_high);
-			printk(KERN_INFO "PUPU on node[%d], nr_anon_pages: %lu, "
-			     "high_limit = %lu\n", nid, nr_pages_per_node, high);
 			mem_high = nr_pages_per_node > high;
-			//mem_high = nr_pages_per_node - high;
+			if (mc == memcg)
+				printk(KERN_INFO "PUPU on node[%d], nr_anon_pages: %lu, high_limit = %lu\n", nid, nr_pages_per_node, high);
 
 			/* Don't bother a random interrupted task */
 			if (!in_task()) {
@@ -2978,15 +2983,21 @@ done_restock:
 			}
 
 			if (mem_high) {
-				current->memcg_nr_pages_over_high += batch;
+				//current->memcg_nr_pages_over_high += batch;
+				nodeinfo->nr_pages_over_high += batch;
+				//current->memcg_over_high = mc;
 				set_notify_resume(current);
 				break;
 			}
 		} while ((mc = parent_mem_cgroup(mc)));
-		printk(KERN_INFO "current->memcg_nr_pages_over_high: %u\n",
-		       current->memcg_nr_pages_over_high);
 
-		if (current->memcg_nr_pages_over_high > MEMCG_CHARGE_BATCH &&
+		mc = get_mem_cgroup_from_mm(current->mm);
+		nr_pages_over_high = mc->nodeinfo[nid]->nr_pages_over_high;
+		if (nr_pages_over_high > 0)
+			printk(KERN_INFO "node [%d] nr_pages_over_high: %u\n",
+			       nid, nr_pages_over_high);
+		//if (current->memcg_nr_pages_over_high > MEMCG_CHARGE_BATCH &&
+		if (nr_pages_over_high > MEMCG_CHARGE_BATCH &&
 		    !(current->flags & PF_MEMALLOC) &&
 		    gfpflags_allow_blocking(gfp_mask)) {
 			mem_cgroup_handle_over_high_on_node(nid, gfp_mask);
@@ -6739,11 +6750,12 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 
 		WRITE_ONCE(memcg->nodeinfo[nid]->memory_high, high);
 
-		//printk(KERN_INFO "PUPU numa[%d] high limit: %lu; buf: %s\n", nid, high, high_limit);
+		printk(KERN_INFO "PUPU numa[%d] high limit: %lu; buf: %s\n", nid, high, high_limit);
 	}
 
 	// read memory usage for each numa node
-	for_each_node_state(nid, N_MEMORY) {
+	//for_each_node_state(nid, N_MEMORY) {
+	for_each_node(nid) {
 		for (;;) {
 			unsigned long nr_pages, reclaimed;
 
