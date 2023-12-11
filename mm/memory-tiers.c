@@ -249,6 +249,12 @@ bool node_is_toptier(int node)
 	if (!pgdat)
 		return false;
 
+	//// Hack with harcoded toptier
+	if (node == 0)
+		return true;
+	else
+		return false;
+	////
 	rcu_read_lock();
 	memtier = rcu_dereference(pgdat->memtier);
 	if (!memtier) {
@@ -295,12 +301,15 @@ int next_demotion_node(int node)
 {
 	struct demotion_nodes *nd;
 	int target;
+	//// Hack by hard coding the node id
+	target = 1;
+	return target;	
+	////
 
 	if (!node_demotion)
 		return NUMA_NO_NODE;
 
 	nd = &node_demotion[node];
-
 	/*
 	 * node_demotion[] is updated without excluding this
 	 * function from running.

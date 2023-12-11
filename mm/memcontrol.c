@@ -2970,8 +2970,10 @@ done_restock:
 			nr_pages_per_node = anon_pages_per_node(mc, nid);
 			high = READ_ONCE(nodeinfo->memory_high);
 			mem_high = nr_pages_per_node > high;
-			if (mc == memcg)
-				printk(KERN_INFO "PUPU on node[%d], nr_anon_pages: %lu, high_limit = %lu\n", nid, nr_pages_per_node, high);
+			if (mc == memcg) {
+				if (high != PAGE_COUNTER_MAX)
+					printk(KERN_INFO "PUPU on node[%d], nr_anon_pages: %lu, high_limit = %lu\n", nid, nr_pages_per_node, high);
+			}
 
 			/* Don't bother a random interrupted task */
 			if (!in_task()) {

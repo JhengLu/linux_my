@@ -2795,7 +2795,7 @@ static unsigned int reclaim_folio_list(struct list_head *folio_list,
 		.may_writepage = 1,
 		.may_unmap = 1,
 		.may_swap = 1,
-		.no_demotion = 1,
+		.no_demotion = 0,
 	};
 
 	nr_reclaimed = shrink_folio_list(folio_list, pgdat, &sc, &dummy_stat, false);
