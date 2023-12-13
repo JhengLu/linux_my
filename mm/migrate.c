@@ -2485,12 +2485,26 @@ static int numamigrate_isolate_page(pg_data_t *pgdat, struct page *page)
 {
 	int nr_pages = thp_nr_pages(page);
 	int order = compound_order(page);
+	struct mem_cgroup *memcg;
+	int nid;
+	unsigned long high_limit, nr_pages_per_node;
 
 	VM_BUG_ON_PAGE(order && !PageTransHuge(page), page);
 
 	/* Do not migrate THP mapped by multiple processes */
 	if (PageTransHuge(page) && total_mapcount(page) > 1)
 		return 0;
+
+	/* Check per-numa high limit */
+	/* For now, we avoid waking up kswapd if high limit is reached.
+	 */
+	memcg = page_memcg(page);
+	nid = pgdat->node_id;
+	high_limit = READ_ONCE(memcg->nodeinfo[nid]->memory_high);
+	nr_pages_per_node = anon_pages_per_node(memcg, nid);
+	if (nr_pages_per_node + nr_pages > high_limit) {
+		return 0;
+	}
 
 	/* Avoid migrating to a node that is nearly full */
 	if (!migrate_balanced_pgdat(pgdat, nr_pages)) {
@@ -2502,6 +2516,7 @@ static int numamigrate_isolate_page(pg_data_t *pgdat, struct page *page)
 			if (managed_zone(pgdat->node_zones + z))
 				break;
 		}
+		// TODO: check whether we should always wake up kswapd
 		wakeup_kswapd(pgdat->node_zones + z, 0, order, ZONE_MOVABLE);
 		return 0;
 	}

@@ -1164,6 +1164,16 @@ unsigned long mem_cgroup_soft_limit_reclaim(pg_data_t *pgdat, int order,
 						gfp_t gfp_mask,
 						unsigned long *total_scanned);
 
+static inline unsigned long anon_pages_per_node(struct mem_cgroup *memcg,
+						int nid)
+{
+	struct lruvec *lruvec;
+	int item = NR_ANON_MAPPED;
+
+	lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
+	return lruvec_page_state(lruvec, item);
+}
+
 #else /* CONFIG_MEMCG */
 
 #define MEM_CGROUP_ID_SHIFT	0
