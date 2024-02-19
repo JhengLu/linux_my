@@ -302,7 +302,7 @@ int next_demotion_node(int node)
 	struct demotion_nodes *nd;
 	int target;
 	//// Hack by hard coding the node id
-	target = 1;
+	target = 1;		// TODO: change based on the actual setting. Here target = 1 means numa node 1 is the remote node
 	return target;	
 	////
 
