@@ -2501,7 +2501,7 @@ static int numamigrate_isolate_page(pg_data_t *pgdat, struct page *page)
 	memcg = page_memcg(page);
 	nid = pgdat->node_id;
 	high_limit = READ_ONCE(memcg->nodeinfo[nid]->memory_high);
-	nr_pages_per_node = anon_pages_per_node(memcg, nid);
+	nr_pages_per_node = count_pages_per_node(memcg, nid);
 	if (nr_pages_per_node + nr_pages > high_limit) {
 		return 0;
 	}

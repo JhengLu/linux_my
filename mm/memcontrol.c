@@ -2418,7 +2418,7 @@ static unsigned long reclaim_high_on_node(struct mem_cgroup *memcg,
 		unsigned long pflags, high;
 
 		high = READ_ONCE(memcg->nodeinfo[nid]->memory_high);
-		if (anon_pages_per_node(memcg, nid) <= high)
+		if (count_pages_per_node(memcg, nid) <= high)
 			continue;
 
 		memcg_memory_event(memcg, MEMCG_HIGH);
@@ -2961,7 +2961,7 @@ done_restock:
 			struct mem_cgroup_per_node *nodeinfo =
 				mc->nodeinfo[nid];
 
-			nr_pages_per_node = anon_pages_per_node(mc, nid);
+			nr_pages_per_node = count_pages_per_node(mc, nid);
 			high = READ_ONCE(nodeinfo->memory_high);
 			mem_high = nr_pages_per_node > high;
 			if (mc == memcg) {
@@ -6755,7 +6755,7 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 		for (;;) {
 			unsigned long nr_pages, reclaimed;
 
-			nr_pages = anon_pages_per_node(memcg, nid);
+			nr_pages = count_pages_per_node(memcg, nid);
 			high = READ_ONCE(memcg->nodeinfo[nid]->memory_high);
 
 			if (nr_pages <= high)

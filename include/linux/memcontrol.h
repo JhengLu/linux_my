@@ -1174,6 +1174,18 @@ static inline unsigned long anon_pages_per_node(struct mem_cgroup *memcg,
 	return lruvec_page_state(lruvec, item);
 }
 
+static inline unsigned long count_pages_per_node(struct mem_cgroup *memcg,
+						int nid)
+{
+	struct lruvec *lruvec;
+	unsigned long nr_pages = 0;
+
+	lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
+	nr_pages += lruvec_page_state(lruvec, NR_ANON_MAPPED);
+	nr_pages += lruvec_page_state(lruvec, NR_FILE_MAPPED);
+	return nr_pages;
+}
+
 #else /* CONFIG_MEMCG */
 
 #define MEM_CGROUP_ID_SHIFT	0
