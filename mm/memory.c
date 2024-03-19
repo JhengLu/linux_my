@@ -2849,6 +2849,7 @@ static inline int __wp_page_copy_user(struct page *dst, struct page *src,
 		entry = pte_mkyoung(vmf->orig_pte);
 		if (ptep_set_access_flags(vma, addr, vmf->pte, entry, 0))
 			update_mmu_cache_range(vmf, vma, addr, vmf->pte, 1);
+        //printk(KERN_INFO "PUPU ptep_set_access_flags() called in __wp_page_copy_user()\n");
 	}
 
 	/*
@@ -4822,6 +4823,7 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 			&flags);
 	if (target_nid == NUMA_NO_NODE) {
 		put_page(page);
+        //printk(KERN_INFO "PUPU for page on node [%d], target_nid = %d; equals NUMA_NO_NODE\n", page_nid, target_nid);
 		goto out_map;
 	}
 	pte_unmap_unlock(vmf->pte, vmf->ptl);

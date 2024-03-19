@@ -3323,8 +3323,8 @@ static void task_numa_work(struct callback_head *work)
 			continue;
 
 		/* Do not scan the VMA if task has not accessed */
-		if (!vma_is_accessed(vma))
-			continue;
+		////if (!vma_is_accessed(vma))
+		////	continue;
 
 		/*
 		 * RESET access PIDs regularly for old VMAs. Resetting after checking
@@ -3343,6 +3343,7 @@ static void task_numa_work(struct callback_head *work)
 			end = ALIGN(start + (pages << PAGE_SHIFT), HPAGE_SIZE);
 			end = min(end, vma->vm_end);
 			nr_pte_updates = change_prot_numa(vma, start, end);
+            //printk(KERN_INFO "PUPU nr_pte_updates: %lu, start = %lu; end = %lu \n", nr_pte_updates, start, end);
 
 			/*
 			 * Try to scan sysctl_numa_balancing_size worth of
