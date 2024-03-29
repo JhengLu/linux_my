@@ -3288,6 +3288,10 @@ static void task_numa_work(struct callback_head *work)
 		 * hinting faults in read-only file-backed mappings or the vdso
 		 * as migrating the pages will be of marginal benefit.
 		 */
+        // if (!vma->vm_mm ||
+		//     (vma->vm_file && (vma->vm_flags & (VM_READ|VM_WRITE)) == (VM_READ)))
+        
+        //// Allow file-backed pages in promotion
 		if (!vma->vm_mm)
 			continue;
 
