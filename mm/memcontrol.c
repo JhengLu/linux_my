@@ -6740,6 +6740,11 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 		char *high_limit = strsep(&buf, "\n");
 		high_limit = strstrip(high_limit);
 
+		// Check if node exists
+		if (!node_online(nid)) {
+			continue;
+		}
+
 		err = page_counter_memparse(high_limit, "max", &high);
 		if (err)
 			return err;
