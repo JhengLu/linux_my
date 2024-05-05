@@ -2951,8 +2951,8 @@ done_restock:
 
 	// TODO: fix this bug: when break happens in line #2977, current->nr_pages_over_high is carried over to nid=1,
 	// causing reclamation always happen on node 1 (why it checks > 64 instead of >= 64 at line #2993?)
-	//for_each_node_state(nid, N_MEMORY) {
-	for_each_online_node(nid) {
+	//	for_each_node(nid) {
+	for_each_node_state(nid, N_MEMORY) {
 		struct mem_cgroup *mc = memcg;
 		unsigned int nr_pages_over_high;
 		do {
@@ -5497,7 +5497,8 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 		goto fail;
 
 	INIT_WORK(&memcg->high_work, high_work_func);
-	for_each_online_node(node)
+//	for_each_node(node)
+	for_each_node_state(node, N_MEMORY)
 		INIT_WORK(&memcg->nodeinfo[node]->high_work,
 			  high_work_func_per_node);
 	INIT_LIST_HEAD(&memcg->oom_notify);
@@ -5549,7 +5550,8 @@ mem_cgroup_css_alloc(struct cgroup_subsys_state *parent_css)
 	memcg->zswap_max = PAGE_COUNTER_MAX;
 #endif
 	page_counter_set_high(&memcg->swap, PAGE_COUNTER_MAX);
-	for_each_online_node(nid) {
+//	for_each_node(nid) {
+	for_each_node_state(nid, N_MEMORY){
 		WRITE_ONCE(memcg->nodeinfo[nid]->memory_high, PAGE_COUNTER_MAX);
 	}
 	if (parent) {
@@ -5716,7 +5718,8 @@ static void mem_cgroup_css_reset(struct cgroup_subsys_state *css)
 	page_counter_set_min(&memcg->memory, 0);
 	page_counter_set_low(&memcg->memory, 0);
 	page_counter_set_high(&memcg->memory, PAGE_COUNTER_MAX);
-	for_each_online_node(nid) {
+//	for_each_node(nid) {
+	for_each_node_state(nid, N_MEMORY){
 		WRITE_ONCE(memcg->nodeinfo[nid]->memory_high, PAGE_COUNTER_MAX);
 	}
 	WRITE_ONCE(memcg->soft_limit, PAGE_COUNTER_MAX);
@@ -6718,22 +6721,17 @@ static ssize_t memory_high_write(struct kernfs_open_file *of,
 static int memory_per_numa_high_show(struct seq_file *m, void *v)
 {
 	int nid;
-	for_each_online_node(nid) {
-		printk(KERN_INFO "PUPU check show numa[%d]\n", nid);
-		// Check if node exists
-		if (!node_online(nid)) {
-			printk(KERN_INFO "PUPU show numa[%d] is not online\n", nid);
-			continue;
-		}
+//	for_each_node(nid) {
+	for_each_node_state(nid, N_MEMORY){
 		struct mem_cgroup *memcg = mem_cgroup_from_seq(m);
 		seq_puts_memcg_tunable(m,
-				       READ_ONCE(memcg->nodeinfo[nid]->memory_high));
+			READ_ONCE(memcg->nodeinfo[nid]->memory_high));
 	}
 	return 0;
 }
 
 static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
-					  char *buf, size_t nbytes, loff_t off)
+				 char *buf, size_t nbytes, loff_t off)
 {
 	struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
 	unsigned int nr_retries = MAX_RECLAIM_RETRIES;
@@ -6741,16 +6739,12 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 	unsigned long high;
 	int nid;
 
-	for_each_online_node(nid) {
-		printk(KERN_INFO "PUPU check numa[%d]\n", nid);
-		// Check if node exists
-		if (!node_online(nid)) {
-			printk(KERN_INFO "PUPU numa[%d] is not online\n", nid);
-			continue;
-		}
+//	for_each_node(nid) {
+	for_each_node_state(nid, N_MEMORY){
 		int err;
 		char *high_limit = strsep(&buf, "\n");
 		high_limit = strstrip(high_limit);
+
 		err = page_counter_memparse(high_limit, "max", &high);
 		if (err)
 			return err;
@@ -6761,13 +6755,8 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 	}
 
 	// read memory usage for each numa node
-	//for_each_node_state(nid, N_MEMORY) {
-	for_each_online_node(nid) {
-		printk(KERN_INFO "PUPU check for update numa[%d]\n", nid);
-		if (!node_online(nid)) {
-			printk(KERN_INFO "PUPU numa[%d] is not online when check update\n", nid);
-			continue;
-		}
+//	for_each_node(nid) {
+	for_each_node_state(nid, N_MEMORY) {
 		for (;;) {
 			unsigned long nr_pages, reclaimed;
 
