@@ -6742,17 +6742,15 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 	int nid;
 
 	for_each_node(nid) {
-		int err;
-		char *high_limit = strsep(&buf, "\n");
-		high_limit = strstrip(high_limit);
-
 		printk(KERN_INFO "PUPU check numa[%d]\n", nid);
 		// Check if node exists
 		if (!node_online(nid)) {
 			printk(KERN_INFO "PUPU numa[%d] is not online\n", nid);
 			continue;
 		}
-
+		int err;
+		char *high_limit = strsep(&buf, "\n");
+		high_limit = strstrip(high_limit);
 		err = page_counter_memparse(high_limit, "max", &high);
 		if (err)
 			return err;
