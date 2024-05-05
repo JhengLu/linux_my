@@ -6719,15 +6719,21 @@ static int memory_per_numa_high_show(struct seq_file *m, void *v)
 {
 	int nid;
 	for_each_node(nid) {
+		printk(KERN_INFO "PUPU check show numa[%d]\n", nid);
+		// Check if node exists
+		if (!node_online(nid)) {
+			printk(KERN_INFO "PUPU show numa[%d] is not online\n", nid);
+			continue;
+		}
 		struct mem_cgroup *memcg = mem_cgroup_from_seq(m);
 		seq_puts_memcg_tunable(m,
-			READ_ONCE(memcg->nodeinfo[nid]->memory_high));
+				       READ_ONCE(memcg->nodeinfo[nid]->memory_high));
 	}
 	return 0;
 }
 
 static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
-				 char *buf, size_t nbytes, loff_t off)
+					  char *buf, size_t nbytes, loff_t off)
 {
 	struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
 	unsigned int nr_retries = MAX_RECLAIM_RETRIES;
@@ -6740,8 +6746,10 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 		char *high_limit = strsep(&buf, "\n");
 		high_limit = strstrip(high_limit);
 
+		printk(KERN_INFO "PUPU check numa[%d]\n", nid);
 		// Check if node exists
 		if (!node_online(nid)) {
+			printk(KERN_INFO "PUPU numa[%d] is not online\n", nid);
 			continue;
 		}
 
@@ -6757,6 +6765,11 @@ static ssize_t memory_per_numa_high_write(struct kernfs_open_file *of,
 	// read memory usage for each numa node
 	//for_each_node_state(nid, N_MEMORY) {
 	for_each_node(nid) {
+		printk(KERN_INFO "PUPU check for update numa[%d]\n", nid);
+		if (!node_online(nid)) {
+			printk(KERN_INFO "PUPU numa[%d] is not online when check update\n", nid);
+			continue;
+		}
 		for (;;) {
 			unsigned long nr_pages, reclaimed;
 
